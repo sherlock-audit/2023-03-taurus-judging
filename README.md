@@ -3,7 +3,7 @@
 Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/35 
 
 ## Found by 
-Bahurum, jonatascm, roguereddwarf, RaymondFam, yixxas, cducrest-brainbot, peanuts, GimelSec, Bauer, mstpr-brainbot, duc, ck, 0x52, bytes032, imare
+imare, GimelSec, jonatascm, cducrest-brainbot, 0x52, bytes032, Bauer, Bahurum, duc, yixxas, mstpr-brainbot, RaymondFam, roguereddwarf, peanuts, ck
 
 ## Summary
 
@@ -65,133 +65,80 @@ Manual Review
 
 Account for the collateral decimals in the calculation instead of using `Constants.PRECISION`.
 
-# Issue H-2: User can prevent liquidations by frontrunning the tx and slightly increasing their collateral 
-
-Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/12 
-
-## Found by 
-Ruhum, cryptostellar5
-
-## Summary
-User can prevent liquidations by frontrunning the tx and decreasing their debt so that the liquidation transaction reverts.
-
-## Vulnerability Detail
-In the liquidation transaction, the caller has to specify the amount of debt they want to liquidate, `_debtAmount`. The maximum value for that parameter is the total amount of debt the user holds:
-```sol
-    function liquidate(
-        address _account,
-        uint256 _debtAmount,
-        uint256 _minExchangeRate
-    ) external onlyLiquidator whenNotPaused updateReward(_account) returns (bool) {
-        if (_debtAmount == 0) revert wrongLiquidationAmount();
-
-        UserDetails memory accDetails = userDetails[_account];
-
-        // Since Taurus accounts' debt continuously decreases, liquidators may pass in an arbitrarily large number in order to
-        // request to liquidate the entire account.
-        if (_debtAmount > accDetails.debt) {
-            _debtAmount = accDetails.debt;
-        }
-
-        // Get total fee charged to the user for this liquidation. Collateral equal to (liquidated taurus debt value * feeMultiplier) will be deducted from the user's account.
-        // This call reverts if the account is healthy or if the liquidation amount is too large.
-        (uint256 collateralToLiquidate, uint256 liquidationSurcharge) = _calcLiquidation(
-            accDetails.collateral,
-            accDetails.debt,
-            _debtAmount
-        );
-```
-
-In `_calcLiquidation()`, the contract determines how much collateral to liquidate when `_debtAmount` is paid by the caller. In that function, there's a check that reverts if the caller tries to liquidate more than they are allowed to depending on the position's health.
-```sol
-    function _calcLiquidation(
-        uint256 _accountCollateral,
-        uint256 _accountDebt,
-        uint256 _debtToLiquidate
-    ) internal view returns (uint256 collateralToLiquidate, uint256 liquidationSurcharge) {
-        // ... 
-        
-        // Revert if requested liquidation amount is greater than allowed
-        if (
-            _debtToLiquidate >
-            _getMaxLiquidation(_accountCollateral, _accountDebt, price, decimals, totalLiquidationDiscount)
-        ) revert wrongLiquidationAmount();
-```
-
-The goal is to get that if-clause to evaluate to `true` so that the transaction reverts. To modify your position's health you have two possibilities: either you increase your collateral or decrease your debt. So instead of preventing the liquidation by pushing your position to a healthy state, you only modify it slightly so that the caller's liquidation transaction reverts.
-
-Given that Alice has:
-- 100 TAU debt
-- 100 Collateral (price = $1 so that collateralization rate is 1)
-Her position can be liquidated. The max value is:
-```sol
-    function _getMaxLiquidation(
-        uint256 _collateral,
-        uint256 _debt,
-        uint256 _price,
-        uint8 _decimals,
-        uint256 _liquidationDiscount
-    ) internal pure returns (uint256 maxRepay) {
-        // Formula to find the liquidation amount is as follows
-        // [(collateral * price) - (liqDiscount * liqAmount)] / (debt - liqAmount) = max liq ratio
-        // Therefore
-        // liqAmount = [(max liq ratio * debt) - (collateral * price)] / (max liq ratio - liqDiscount)
-        maxRepay =
-            ((MAX_LIQ_COLL_RATIO * _debt) - ((_collateral * _price * Constants.PRECISION) / (10 ** _decimals))) /
-            (MAX_LIQ_COLL_RATIO - _liquidationDiscount);
-
-        // Liquidators cannot repay more than the account's debt
-        if (maxRepay > _debt) {
-            maxRepay = _debt;
-        }
-
-        return maxRepay;
-    }
-```
-$(1.3e18 * 100e18 - (100e18 * 1e18 * 1e18) / 1e18) / 1.3e18 = 23.07e18$ (leave out liquidation discount for easier math)
-
-The liquidator will probably use the maximum amount they can liquidate and call `liquidate()` with `23.07e18`. Alice frontruns the liquidator's transaction and increases the collateral by `1`. That will change the max liquidation amount to:
-$(1.3e18 * 100e18 - 101e18 * 1e18) / 1.3e18 = 22.3e18$.
-
-That will cause `_calcLiquidation()` to revert because `23.07e18 > 22.3e18`.
-
-The actual amount of collateral to add or debt to decrease depends on the liquidation transaction. But, generally, you would expect the liquidator to liquidate as much as possible. Thus, you only have to slightly move the position to cause their transaction to revert
-
-## Impact
-User can prevent liquidations by slightly modifying their position without putting it at a healthy state.
-
-## Code Snippet
-https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/Vault/BaseVault.sol#L342-L363
-
-https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/Vault/BaseVault.sol#L396-L416
-
-https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/Vault/BaseVault.sol#L240
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-In `_calcLiquidation()` the function shouldn't revert if `_debtToLiqudiate > _getMaxLiquidation()`. Instead, just continue with the value `_getMaxLiquidation()` returns. 
-
 ## Discussion
 
-**Sierraescape**
+**IAm0x52**
 
-Great write-up and recommendation.
+Escalate for 10 USDC
 
-**Sierraescape**
+This should be medium rather than high, since affected tokens would simply be incompatible because MIN_COL_RATIO is expressed to 18 dp.
 
-https://github.com/protokol/taurus-contracts/pull/115
+**sherlock-admin**
+
+ > Escalate for 10 USDC
+> 
+> This should be medium rather than high, since affected tokens would simply be incompatible because MIN_COL_RATIO is expressed to 18 dp.
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**iHarishKumar**
+
+https://github.com/protokol/taurus-contracts/pull/124
+
+**spyrosonic10**
+
+Escalate for 10 USDC
+
+From the constest scope
+`ERC20: any non-rebasing. In particular, fee + staked GLP will be the first collateral token (managed through GMX's ERC20-compliant wrapper) and Arbitrum Weth will be the main yield token.`
+
+Present state of contract is designed and to use with 18 decimal gmx token.  Future release should be out of scope so it is invalid issue. In order to launch other vault types protocol will be the first to know about decimal things. Given the current state of protocol and codebase this issue doesn't pose any risk to user funds. Not qualified for high.
+
+**sherlock-admin**
+
+ > Escalate for 10 USDC
+> 
+> From the constest scope
+> `ERC20: any non-rebasing. In particular, fee + staked GLP will be the first collateral token (managed through GMX's ERC20-compliant wrapper) and Arbitrum Weth will be the main yield token.`
+> 
+> Present state of contract is designed and to use with 18 decimal gmx token.  Future release should be out of scope so it is invalid issue. In order to launch other vault types protocol will be the first to know about decimal things. Given the current state of protocol and codebase this issue doesn't pose any risk to user funds. Not qualified for high.
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**hrishibhat**
+
+Escalation rejected
+
+Given that the assumption for 18 decimals impacts calculations across the codebase and also affects the borrow calculations, considering this issue a valid high. 
+
+
+**sherlock-admin**
+
+> Escalation rejected
+> 
+> Given that the assumption for 18 decimals impacts calculations across the codebase and also affects the borrow calculations, considering this issue a valid high. 
+> 
+
+This issue's escalations have been rejected!
+
+Watsons who escalated this issue will have their escalation amount deducted from their next payout.
 
 
 
-# Issue H-3: Missing input validation for _rewardProportion parameter allows keeper to escalate his privileges and pay back all loans 
+# Issue H-2: Missing input validation for _rewardProportion parameter allows keeper to escalate his privileges and pay back all loans 
 
 Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/11 
 
 ## Found by 
-cducrest-brainbot, roguereddwarf
+roguereddwarf, cducrest-brainbot
 
 ## Summary
 According to the Contest page and discussion with the sponsor, the role of a `keeper` is to perform liquidations and to swap yield token for `TAU` using the `SwapHandler.swapForTau` function:
@@ -256,51 +203,12 @@ https://github.com/protokol/taurus-contracts/pull/121
 
 
 
-# Issue M-1: GmxYieldAdapter#collectYield continues to function even on a paused vault 
-
-Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/182 
-
-## Found by 
-0x52
-
-## Summary
-
-In the readme it states: "Users can exit paused vaults, but otherwise no significant action should be possible on them." However, it is still possible to collect yield from GMX when the vault is paused. This is because GmxYieldAdapter#collectYield lacks the whenNotPaused modifier. 
-
-## Vulnerability Detail
-
-See summary
-
-## Impact
-
-Yield can still be collected even when the vault is paused, which is problematic depending on why the vault is paused
-
-## Code Snippet
-
-[GmxYieldAdapter.sol#L32-L35](https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/Vault/YieldAdapters/GMX/GmxYieldAdapter.sol#L32-L35)
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Add the whenNotPaused modifer to GmxYieldAdapter#collectYield
-
-## Discussion
-
-**Sierraescape**
-
-https://github.com/protokol/taurus-contracts/pull/83
-
-
-
-# Issue M-2: `swap()` will be reverted if `path` has more tokens. 
+# Issue M-1: `swap()` will be reverted if `path` has more tokens. 
 
 Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/160 
 
 ## Found by 
-shaka, GimelSec
+GimelSec, shaka
 
 ## Summary
 
@@ -384,12 +292,12 @@ https://github.com/protokol/taurus-contracts/pull/82
 
 
 
-# Issue M-3: Mint limit is not reduced when the Vault is burning TAU 
+# Issue M-2: Mint limit is not reduced when the Vault is burning TAU 
 
 Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/149 
 
 ## Found by 
-Chinmay, HonorLt, 8olidity, LethL, shaka, nobody2018, cducrest-brainbot, GimelSec, y1cunhui, chaduke, mstpr-brainbot, tvdung94, Ruhum, duc, SunSec, bytes032
+SunSec, GimelSec, chaduke, shaka, tvdung94, Ruhum, cducrest-brainbot, nobody2018, Chinmay, duc, LethL, y1cunhui, mstpr-brainbot, HonorLt, 8olidity, bytes032
 
 ## Summary
 
@@ -440,241 +348,12 @@ https://github.com/protokol/taurus-contracts/pull/85
 
 
 
-# Issue M-4: Funds can be stolen from `UniswapSwapAdapter` if swap was satisfied only partially 
-
-Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/133 
-
-## Found by 
-libratus, roguereddwarf
-
-## Summary
-There can be scenarios where tokens transferred to `UniswapSwapAdapter` are only partially swapped for TAU. In that case, a certain amount remains on the contract and can be withdrawn by anyone
-
-## Vulnerability Detail
-In order to swap yield rewards for TAU `SwapHandler.swapForTau` function transfers yield tokens to `UniswapSwapAdapter` and calls `swap`. 
-```solidity
-        IERC20(_yieldTokenAddress).safeTransfer(swapAdapterAddress, swapAmount);
-
-        // Call swap function, which will transfer resulting tau back to this contract and return the amount transferred.
-        // Note that this contract does not check that the swap adapter has transferred the correct amount of tau. This check
-        // is handled by the swap adapter, and for this reason any registered swap adapter must be a completely trusted contract.
-        uint256 tauReturned = BaseSwapAdapter(swapAdapterAddress).swap(tau, _swapParams);
-```
-
-The amount of tokens to swap is passed in `_yieldTokenAmount` parameters, while swap parameters are in `_swapParams`.
-```solidity
-    function swapForTau(
-        address _yieldTokenAddress,
-        uint256 _yieldTokenAmount,
-        uint256 _minTauReturned,
-        bytes32 _swapAdapterHash,
-        uint256 _rewardProportion,
-        bytes calldata _swapParams    
-    ) external onlyKeeper whenNotPaused {
-```
-
-`UniswapSwapAdapter` is supposed to perform a swap using *all* of the yield tokens sent to it and return "out" tokens back to `SwapHandler`. There can be scenarios where not all yield tokens are swapped, in which case they will remain on `UniswapSwapAdapter` and will be available for withdrawal by anyone since `swap` has no access control.
-
-First scenario is if there was an inconsistency between `_yieldTokenAmount` and `_swapParams`. These parameters are not validated against each other. It is possible to pass `swapParams` with `_amountIn` much smaller than `_yieldTokenAmount`. It is an input validation issue, but one that leads to instant loss of funds and therefore can be considered "Medium".
-
-Second scenario is in an unlikely case that liquidity pool is depleted and there are not enough TAU tokens to perform the swap fully. In this case, Uniswap will perform a partial swap and the unswapped yield tokens will remain on the contract.
-
-## Impact
-Tokens can be stolen from `UniswapSwapAdapter` 
-
-## Code Snippet
-https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/Vault/SwapHandler.sol#L75-L80
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-- validate `_yieldTokenAmount` and `_swapParams` against each other
-- return tokens back to `SwapHandler` in case of a partial Uniswap swap
-- consider restricting access for `UniswapSwapAdapter.swap`.
-
-## Discussion
-
-**Sierraescape**
-
-https://github.com/protokol/taurus-contracts/pull/120
-
-
-
-# Issue M-5: baseVault#emergencyClosePosition permanently breaks award accounting 
-
-Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/117 
-
-## Found by 
-yixxas, 0x52, GimelSec
-
-## Summary
-
-When using emergency close it should store the unclaimed rewards to be distributed later since the user can't claim them later
-
-## Vulnerability Detail
-
-[BaseVault.sol#L227-L229](https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/Vault/BaseVault.sol#L227-L229)
-
-    function emergencyClosePosition() external {
-        _modifyPosition(msg.sender, userDetails[msg.sender].collateral, userDetails[msg.sender].debt, false, false);
-    }
-
-`emergencyClosePosition` allows a user to completely close their position without updating their debt. This allows users to force close their position even when the contract is paused. Because it bypasses `updateReward`, all unclaimed TAU will be silently lost and becomes unrecoverable.
-
-[BaseVault.sol#L78-L118](https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/Vault/BaseVault.sol#L78-L118)
-
-    modifier updateReward(address _account) {
-        // Disburse available yield from the drip feed
-        _disburseTau();
-
-        // If user has collateral, pay down their debt and recycle surplus rewards back into the tauDripFeed.
-        uint256 _userCollateral = userDetails[_account].collateral;
-        if (_userCollateral > 0) {
-            ...
-        } else {
-            // If this is a new user, add them to the userAddresses array to keep track of them.
-            if (userDetails[_account].startTimestamp == 0) {
-                userAddresses.push(_account);
-                userDetails[_account].startTimestamp = block.timestamp;
-            }
-        }
-
-        // Update user lastUpdatedRewardPerCollateral
-        userDetails[_account].lastUpdatedRewardPerCollateral = cumulativeTauRewardPerCollateral;
-        _;
-    }
-
-Since `emergencyClosePosition` completely closes out the entire position the next time a user interacts with the contract it will bypass all the reward logic and update their `lastUpdatedRewardPerCollateral`. This means that all accrued rewards before calling `emergencyClosePosition` can never be claimed.
-
-Example:
-
-A user's `rewardPerCollateral` is 1e18 and the `cumulativeRewardPerCollateral` is 1.1e18 with a collateral of 100e18. This would mean that the user is owed 10e18 in rewards. They call `emergencyClosePosition` and now that 10e18 is lost. Since this value is never used to offset any debt it is essentially lost.
-
-## Impact
-
-TAU will be silently lost and becomes unrecoverable.
-
-## Code Snippet
-
-[BaseVault.sol#L78-L118](https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/Vault/BaseVault.sol#L78-L118)
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Lost rewards should be tracked distributed to the rest of the vault.
-
-## Discussion
-
-**Sierraescape**
-
->TAU will be silently lost and becomes unrecoverable.
-
-Since it is burned, it would be more accurate to say that tau is returned to the protocol rather than used to pay off user debt. This is unfortunate for the users, but the alternative is to risk tau hyperinflation if the vault is paused due to an issue with the reward accounting system.
-
-We will make it clear to users that if they withdraw while the vault is paused, they will not earn any unclaimed rewards. If this is a large issue, we'd prefer to mint tau directly to affected users (via a governance action once whatever circumstances paused the vault have been resolved) rather than open the vault up to this sort of vulnerability.
-
-So this is intended behavior.
-
-**Evert0x**
-
-Still considering medium as it seems like it can be used for a grieving attack.
-
-
-
-# Issue M-6: BaseVault: liquidationSurcharge amount is too high if collateralToLiquidate gets capped 
-
-Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/89 
-
-## Found by 
-roguereddwarf
-
-## Summary
-According to the comment explaining the `LIQUIDATION_SURCHARGE` percentage, it should be a percentage of the liquidated amount:
-[Link](https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/Vault/BaseVault.sol#L64-L65)
-```solidity
-// 2% of the liquidated amount is sent to the FeeSplitter to fund protocol stability
-// and disincentivize self-liquidation
-```
-
-So if say $100 of collateral is liquidated, the surcharge should be $2. I will show how this is not true in some cases. I.e. the surcharge may be higher (even a lot higher).
-
-I had a discussion about this with the sponsor and it was assessed that this is unintended behavior. The liquidation surcharge percentage breaks in the case that I will show.
-
-## Vulnerability Detail
-Let's have a look at how the liquidation surcharge is calculated:
-[Link](https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/Vault/BaseVault.sol#L406-L421)
-```solidity
-        uint256 collateralToLiquidateWithoutDiscount = (_debtToLiquidate * (10 ** decimals)) / price;
-        collateralToLiquidate = (collateralToLiquidateWithoutDiscount * totalLiquidationDiscount) / Constants.PRECISION;
-        if (collateralToLiquidate > _accountCollateral) {
-            collateralToLiquidate = _accountCollateral;
-        }
-
-
-        // Revert if requested liquidation amount is greater than allowed
-        if (
-            _debtToLiquidate >
-            _getMaxLiquidation(_accountCollateral, _accountDebt, price, decimals, totalLiquidationDiscount)
-        ) revert wrongLiquidationAmount();
-
-
-        return (
-            collateralToLiquidate,
-            (collateralToLiquidateWithoutDiscount * LIQUIDATION_SURCHARGE) / Constants.PRECISION
-        );
-```
-The `collateralToLiquidate` is calculated by multiplying `collateralToLiquidateWithoutDiscount` by `totalLiquidationDiscount`.
-And then it is capped at `_accountCollateral`. The cap is necessary because it is not possible to remove more collateral from the loan than there is left.
-
-As part of the return statement, the `liquidationSurcharge` return value is calculated as `(collateralToLiquidateWithoutDiscount * LIQUIDATION_SURCHARGE) / Constants.PRECISION`.
-
-It becomes clear that this can result in a higher liquidation surcharge than expected:
-Let `collateralToLiquidateWithoutDiscount=$100`, `totalLiquidationDiscount=120%` (20% percent discount on the collateral).
-Then `collateralToLiquidate=$100*120%=$120` and `liquidationSurcharge=$100*2%=$2`.
-
-If however the `collateralToLiquidate` gets capped at say $50, then `liquidationSurcharge` is still calculated in the same way.
-But the surcharge percentage would actually be `$2/$50=4%` instead of the expected 2%.
-
-## Impact
-The `liquidationSurcharge` that is charged to the liquidator by subtracting it from the collateral he receives may not be the 2% that it is supposed to. This means that the liquidator needs to pay a higher liquidation fee in some cases and ends up with less profit.
-
-## Code Snippet
-https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/Vault/BaseVault.sol#L396-L422
-
-https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/Vault/BaseVault.sol#L432-L445
-
-## Tool used
-Manual Review
-
-## Recommendation
-It is not obvious how this issue can be fixed because the surcharge percentage is not well defined for when `collateralToLiquidate > _accountCollateral` and the `collateralToLiquidate` is capped.
-
-After all if this is the case then what should `collateralToLiquidateWithoutDiscount` be?
-Should the amount by which `collateralToLiquidate` is reduced due to the cap be taken from the discount or from `collateralToLiquidate` AND the discount.
-
-In other words it is not clear what value to use to calculate the liquidation surcharge.
-
-This has been discussed with the sponsor and they should look into different ways to modify the calculation by first firmly establishing how the liquidation surcharge is intended to behave.
-
-## Discussion
-
-**Sierraescape**
-
-https://github.com/protokol/taurus-contracts/pull/122
-
-
-
-# Issue M-7: Account can not be liquidated when price fall by 99%. 
+# Issue M-3: Account can not be liquidated when price fall by 99%. 
 
 Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/61 
 
 ## Found by 
-spyrosonic10
+roguereddwarf, spyrosonic10
 
 ## Summary
 Liquidation fails when price fall by 99%.  
@@ -754,55 +433,67 @@ https://github.com/protokol/taurus-contracts/pull/122
 Since this is an edge case for the given price fall resulting in reverting liquidations, 
 Considering this as a valid medium
 
+**IAm0x52**
+
+Escalate for 10 USDC
+
+This is the same root cause as #89 that the liquidation surcharge is calculated based on the uncapped amount. This is another symptom of that same underlying problem, so it should be a dupe of #89 
+
+**sherlock-admin**
+
+ > Escalate for 10 USDC
+> 
+> This is the same root cause as #89 that the liquidation surcharge is calculated based on the uncapped amount. This is another symptom of that same underlying problem, so it should be a dupe of #89 
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**spyrosonic10**
+
+Escalate for 10 USDC
+
+I do not agree with escalation raised above. This issue is about failure of liquidation when price fall by x%. This finding is an edge case where it does impact all underwater accounts so it is fair to say that it impact whole protocol. Root cause and impact both are different in this issue compare to #89 so this is definitely not a duplicate of #89.
 
 
-# Issue M-8: ````emergencyClosePosition()```` is missing the ````whenPaused```` modifier 
+**sherlock-admin**
 
-Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/60 
+ > Escalate for 10 USDC
+> 
+> I do not agree with escalation raised above. This issue is about failure of liquidation when price fall by x%. This finding is an edge case where it does impact all underwater accounts so it is fair to say that it impact whole protocol. Root cause and impact both are different in this issue compare to #89 so this is definitely not a duplicate of #89.
+> 
 
-## Found by 
-KingNFT, roguereddwarf, Diana
+You've created a valid escalation for 10 USDC!
 
-## Summary
-The ````emergencyClosePosition()```` is designed to be called when the contract is paused, as the call may cause users' financial loss. But it is missing to append the ````whenPaused```` modifier. By calling it, users may suffer unwarranted losses when the contract is not paused.
+To remove the escalation from consideration: Delete your comment.
 
-## Vulnerability Detail
-```solidity
-File: contracts\Vault\BaseVault.sol
-221:     /**
-222:      * @dev Function allowing a user to automatically close their position.
-223:      * Note that this function is available even when the contract is paused.
-224:      * Note that since this function does not call updateReward, it should only be used when the contract is paused.
-225:      *
-226:      */
-227:     function emergencyClosePosition() external { // @audit not paused
-228:         _modifyPosition(msg.sender, userDetails[msg.sender].collateral, userDetails[msg.sender].debt, false, false);
-229:     }
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
 
-```
+**hrishibhat**
 
-## Impact
-Users may suffer unexpected losses when the contract is not paused
+Escalation accepted
 
-## Code Snippet
-https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/Vault/BaseVault.sol#L227
+Accepting the first escalation. 
+After further internal discussion, both the outcomes originate out of the same root cause of using `collateralToLiquidateWithoutDiscount` to calculate `liquidationSurcharge`. While one mentions increase in the fee the other instance increases to cause underflow. 
+Considering #89 a duplicate of this issue. 
 
-## Tool used
+**sherlock-admin**
 
-Manual Review
+> Escalation accepted
+> 
+> Accepting the first escalation. 
+> After further internal discussion, both the outcomes originate out of the same root cause of using `collateralToLiquidateWithoutDiscount` to calculate `liquidationSurcharge`. While one mentions increase in the fee the other instance increases to cause underflow. 
+> Considering #89 a duplicate of this issue. 
 
-## Recommendation
-append the ````whenPaused```` modifier.
+This issue's escalations have been accepted!
 
-## Discussion
-
-**iHarishKumar**
-
-https://github.com/protokol/taurus-contracts/pull/110
+Contestants' payouts and scores will be updated according to the changes made on this issue.
 
 
 
-# Issue M-9: A malicious admin can steal all users collateral 
+# Issue M-4: A malicious admin can steal all users collateral 
 
 Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/43 
 
@@ -927,9 +618,47 @@ update of price oracle should be  restricted with a ````timelock````.
 
 https://github.com/protokol/taurus-contracts/pull/128
 
+**spyrosonic10**
+
+Escalate for 10 USDC
+
+PriceOracleManger is Ownable contract so yes it has `owner` param and not `governor` param. So here owner can be governor, timelock and multisig. Also when it come to calling `updateWrapper` multisig can be trusted as it can be trusted to not set deposit fee to max and loot all users. So with that being said this is info/low issue and does not qualify for medium. It may be possible that is entirely out of scope as it is related to admin controlled param.
+
+**sherlock-admin**
+
+ > Escalate for 10 USDC
+> 
+> PriceOracleManger is Ownable contract so yes it has `owner` param and not `governor` param. So here owner can be governor, timelock and multisig. Also when it come to calling `updateWrapper` multisig can be trusted as it can be trusted to not set deposit fee to max and loot all users. So with that being said this is info/low issue and does not qualify for medium. It may be possible that is entirely out of scope as it is related to admin controlled param.
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**hrishibhat**
+
+Escalation rejected
+
+Given that the protocol clearly mentions that admin should be restricted whenever possible from affecting the user collateral adding the restriction makes sense. 
+Considering this issue a valid medium. 
 
 
-# Issue M-10: SwapHandler.sol: Check that collateral token cannot be swapped is insufficient for tokens with multiple addresses 
+**sherlock-admin**
+
+> Escalation rejected
+> 
+> Given that the protocol clearly mentions that admin should be restricted whenever possible from affecting the user collateral adding the restriction makes sense. 
+> Considering this issue a valid medium. 
+> 
+
+This issue's escalations have been rejected!
+
+Watsons who escalated this issue will have their escalation amount deducted from their next payout.
+
+
+
+# Issue M-5: SwapHandler.sol: Check that collateral token cannot be swapped is insufficient for tokens with multiple addresses 
 
 Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/31 
 
@@ -965,89 +694,246 @@ Tokens with multiple addresses are pretty rare, so we're just going to note that
 
 https://github.com/protokol/taurus-contracts/pull/120
 
+**spyrosonic10**
+
+Escalate for 10 USDC
+
+Token with different addresses is very very rare.  Almost every protocols in Defi operating on assumption of token with single address.
+This issue does not qualify as High/Medium.
+
+**sherlock-admin**
+
+ > Escalate for 10 USDC
+> 
+> Token with different addresses is very very rare.  Almost every protocols in Defi operating on assumption of token with single address.
+> This issue does not qualify as High/Medium.
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**roguereddwarf**
+
+Escalate for 10 USDC
+
+Disagree with previous escalation.
+While these tokens are rare they do exist and as pointed out in my report `any non-rebasing` ERC20 is supposed to be supported which clearly includes tokens with multiple addresses.
+So I think this is a valid medium.
+
+**sherlock-admin**
+
+ > Escalate for 10 USDC
+> 
+> Disagree with previous escalation.
+> While these tokens are rare they do exist and as pointed out in my report `any non-rebasing` ERC20 is supposed to be supported which clearly includes tokens with multiple addresses.
+> So I think this is a valid medium.
+
+You've created a valid escalation for 10 USDC!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**hrishibhat**
+
+Escalation accepted
+
+Considering this a valid medium.
+As pointed out in the second escalation, even though these tokens are rare the issue can still be considered valid medium. 
+
+Note: Going forward, Sherlock team will add additional clarity on such rare token cases in the README. 
+
+**sherlock-admin**
+
+> Escalation accepted
+> 
+> Considering this a valid medium.
+> As pointed out in the second escalation, even though these tokens are rare the issue can still be considered valid medium. 
+> 
+> Note: Going forward, Sherlock team will add additional clarity on such rare token cases in the README. 
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
 
 
-# Issue M-11: Liquidation bot is vulnerable to sandwich attack 
 
-Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/19 
+# Issue M-6: User can prevent liquidations by frontrunning the tx and slightly increasing their collateral 
+
+Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/12 
 
 ## Found by 
-Chinmay, yixxas, cducrest-brainbot, ltyu
+cryptostellar5, Ruhum
 
 ## Summary
-Bot attempts to liquidate accounts that are no longer healthy, but hardcodes `_minExchangeRate` to be 0. `_minExchangeRate` is used as slippage check for collateral received when a position is liquidated hence it is an important protection from sandwich attacks.
+User can prevent liquidations by frontrunning the tx and decreasing their debt so that the liquidation transaction reverts.
 
 ## Vulnerability Detail
-Liquidation bot is used to constantly scan for accounts that are no longer healthy via offchain. Because the liquidation bot will liquidate a position and accept any exchange rate, an adversary can perform a sandwich attack.
+In the liquidation transaction, the caller has to specify the amount of debt they want to liquidate, `_debtAmount`. The maximum value for that parameter is the total amount of debt the user holds:
+```sol
+    function liquidate(
+        address _account,
+        uint256 _debtAmount,
+        uint256 _minExchangeRate
+    ) external onlyLiquidator whenNotPaused updateReward(_account) returns (bool) {
+        if (_debtAmount == 0) revert wrongLiquidationAmount();
 
-Adversary can inflate the price of collateral before this liquidate transaction, and force the liquidation bot to receive a much lower amount of collateral, and earning the difference.
+        UserDetails memory accDetails = userDetails[_account];
+
+        // Since Taurus accounts' debt continuously decreases, liquidators may pass in an arbitrarily large number in order to
+        // request to liquidate the entire account.
+        if (_debtAmount > accDetails.debt) {
+            _debtAmount = accDetails.debt;
+        }
+
+        // Get total fee charged to the user for this liquidation. Collateral equal to (liquidated taurus debt value * feeMultiplier) will be deducted from the user's account.
+        // This call reverts if the account is healthy or if the liquidation amount is too large.
+        (uint256 collateralToLiquidate, uint256 liquidationSurcharge) = _calcLiquidation(
+            accDetails.collateral,
+            accDetails.debt,
+            _debtAmount
+        );
+```
+
+In `_calcLiquidation()`, the contract determines how much collateral to liquidate when `_debtAmount` is paid by the caller. In that function, there's a check that reverts if the caller tries to liquidate more than they are allowed to depending on the position's health.
+```sol
+    function _calcLiquidation(
+        uint256 _accountCollateral,
+        uint256 _accountDebt,
+        uint256 _debtToLiquidate
+    ) internal view returns (uint256 collateralToLiquidate, uint256 liquidationSurcharge) {
+        // ... 
+        
+        // Revert if requested liquidation amount is greater than allowed
+        if (
+            _debtToLiquidate >
+            _getMaxLiquidation(_accountCollateral, _accountDebt, price, decimals, totalLiquidationDiscount)
+        ) revert wrongLiquidationAmount();
+```
+
+The goal is to get that if-clause to evaluate to `true` so that the transaction reverts. To modify your position's health you have two possibilities: either you increase your collateral or decrease your debt. So instead of preventing the liquidation by pushing your position to a healthy state, you only modify it slightly so that the caller's liquidation transaction reverts.
+
+Given that Alice has:
+- 100 TAU debt
+- 100 Collateral (price = $1 so that collateralization rate is 1)
+Her position can be liquidated. The max value is:
+```sol
+    function _getMaxLiquidation(
+        uint256 _collateral,
+        uint256 _debt,
+        uint256 _price,
+        uint8 _decimals,
+        uint256 _liquidationDiscount
+    ) internal pure returns (uint256 maxRepay) {
+        // Formula to find the liquidation amount is as follows
+        // [(collateral * price) - (liqDiscount * liqAmount)] / (debt - liqAmount) = max liq ratio
+        // Therefore
+        // liqAmount = [(max liq ratio * debt) - (collateral * price)] / (max liq ratio - liqDiscount)
+        maxRepay =
+            ((MAX_LIQ_COLL_RATIO * _debt) - ((_collateral * _price * Constants.PRECISION) / (10 ** _decimals))) /
+            (MAX_LIQ_COLL_RATIO - _liquidationDiscount);
+
+        // Liquidators cannot repay more than the account's debt
+        if (maxRepay > _debt) {
+            maxRepay = _debt;
+        }
+
+        return maxRepay;
+    }
+```
+$(1.3e18 * 100e18 - (100e18 * 1e18 * 1e18) / 1e18) / 1.3e18 = 23.07e18$ (leave out liquidation discount for easier math)
+
+The liquidator will probably use the maximum amount they can liquidate and call `liquidate()` with `23.07e18`. Alice frontruns the liquidator's transaction and increases the collateral by `1`. That will change the max liquidation amount to:
+$(1.3e18 * 100e18 - 101e18 * 1e18) / 1.3e18 = 22.3e18$.
+
+That will cause `_calcLiquidation()` to revert because `23.07e18 > 22.3e18`.
+
+The actual amount of collateral to add or debt to decrease depends on the liquidation transaction. But, generally, you would expect the liquidator to liquidate as much as possible. Thus, you only have to slightly move the position to cause their transaction to revert
 
 ## Impact
-Adversary can perform a sandwich attack, arbitraging liquidation process at the cost of liquidation bot, resulting in it receiving less collateral than it should for liquidating a position.
+User can prevent liquidations by slightly modifying their position without putting it at a healthy state.
 
 ## Code Snippet
-https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/LiquidationBot/LiquidationBot.sol#L89-L106
+https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/Vault/BaseVault.sol#L342-L363
+
+https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/Vault/BaseVault.sol#L396-L416
+
+https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/Vault/BaseVault.sol#L240
 
 ## Tool used
 
 Manual Review
 
 ## Recommendation
-Consider setting a reasonable `_minExchangeRate` for when calling liquidate via the bot, instead of setting it perpetually at 0.
+In `_calcLiquidation()` the function shouldn't revert if `_debtToLiqudiate > _getMaxLiquidation()`. Instead, just continue with the value `_getMaxLiquidation()` returns. 
 
 ## Discussion
 
 **Sierraescape**
 
-Currently this isn't an issue since the GlpOracle can't reasonably be manipulated, but this seems like a great sanity check, especially for future vaults which may also use the LiquidationBot.
+Great write-up and recommendation.
 
-**iHarishKumar**
+**Sierraescape**
 
-https://github.com/protokol/taurus-contracts/pull/112
+https://github.com/protokol/taurus-contracts/pull/115
 
+**IAm0x52**
 
+Escalate for 10 USDC
 
-# Issue M-12: TAU.sol: Governance address cannot be changed 
+Should be medium since it can only prevent the liquidation temporarily. Similar issues have always been given medium severity such as Cooler:
 
-Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/14 
+https://github.com/sherlock-audit/2023-01-cooler-judging/issues/218
 
-## Found by 
-roguereddwarf
+**sherlock-admin**
 
-## Summary
-The `TAU` contract allows to set the `governance` address in its constructor.
-This is the address that is able to call `setMintLimit` function.
-The function is very important for the protocol because it manages which vaults can mint how much TAU.
+ > Escalate for 10 USDC
+> 
+> Should be medium since it can only prevent the liquidation temporarily. Similar issues have always been given medium severity such as Cooler:
+> 
+> https://github.com/sherlock-audit/2023-01-cooler-judging/issues/218
 
-The issue is that the `governance` address cannot be changed.
+You've created a valid escalation for 10 USDC!
 
-## Vulnerability Detail
-According to the contest page, the governance address may have to change:
-> Governance. Entirely trusted. This role will be initially granted to the multisig.
+To remove the escalation from consideration: Delete your comment.
 
-Governance is initially the multisig but it should be possible to change it later on.
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
 
-## Impact
-The `governance` of the `TAU` contract cannot be changed.
-This makes it impossible to change governance of the protocol since `TAU` is probably the most important part of all in the protocol
+**spyrosonic10**
 
-## Code Snippet
-https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/TAU.sol#L17-L19
+Escalate for 10 USDC
 
-https://github.com/sherlock-audit/2023-03-taurus/blob/main/taurus-contracts/contracts/TAU.sol#L28-L33
+Double down the escalation raise point the it only prevent the liquidation temporarily and hence it should be medium.
 
-## Tool used
-Manual Review
+**sherlock-admin**
 
-## Recommendation
-Implement functionality such that `governance` can transfer its role to another address.
-Maybe make use of the `controller` that the Vault makes use of for access controls such that all roles are managed in one place.
+ > Escalate for 10 USDC
+> 
+> Double down the escalation raise point the it only prevent the liquidation temporarily and hence it should be medium.
 
-## Discussion
+You've created a valid escalation for 10 USDC!
 
-**iHarishKumar**
+To remove the escalation from consideration: Delete your comment.
 
-https://github.com/protokol/taurus-contracts/pull/117
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**hrishibhat**
+
+Escalation accepted
+
+Considering the impact of the attack is just preventing liquidations temporarily, considering this a valid medium
+
+**sherlock-admin**
+
+> Escalation accepted
+> 
+> Considering the impact of the attack is just preventing liquidations temporarily, considering this a valid medium
+
+This issue's escalations have been accepted!
+
+Contestants' payouts and scores will be updated according to the changes made on this issue.
 
 
 
