@@ -3,7 +3,7 @@
 Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/35 
 
 ## Found by 
-imare, GimelSec, jonatascm, cducrest-brainbot, 0x52, bytes032, Bauer, Bahurum, duc, yixxas, mstpr-brainbot, RaymondFam, roguereddwarf, peanuts, ck
+0x52, Bahurum, Bauer, GimelSec, RaymondFam, bytes032, cducrest-brainbot, ck, duc, imare, jonatascm, mstpr-brainbot, peanuts, roguereddwarf, yixxas
 
 ## Summary
 
@@ -64,6 +64,8 @@ Manual Review
 ## Recommendation
 
 Account for the collateral decimals in the calculation instead of using `Constants.PRECISION`.
+
+
 
 ## Discussion
 
@@ -131,14 +133,30 @@ This issue's escalations have been rejected!
 
 Watsons who escalated this issue will have their escalation amount deducted from their next payout.
 
+**MLON33**
 
+> https://github.com/protokol/taurus-contracts/pull/124
+
+Fixed here
+
+**IAm0x52**
+
+Fix allows tokens without 18 dp to be used but liquidations can now cause dust to accumulate in contract
+
+**jacksanford1**
+
+Protocol team (Meriadoc) comment from Discord:
+
+> Yeah I will also look into it and double check it doesn't lead to any problems further down the line, but as is that seems fine.
+
+The dust amount will be considered "acknowledged" by the protocol team. 
 
 # Issue H-2: Missing input validation for _rewardProportion parameter allows keeper to escalate his privileges and pay back all loans 
 
 Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/11 
 
 ## Found by 
-roguereddwarf, cducrest-brainbot
+cducrest-brainbot, roguereddwarf
 
 ## Summary
 According to the Contest page and discussion with the sponsor, the role of a `keeper` is to perform liquidations and to swap yield token for `TAU` using the `SwapHandler.swapForTau` function:
@@ -195,13 +213,23 @@ index c04e3a4..ab5064b 100644
          if (swapAdapterAddress == address(0)) {
 ```
 
+
+
 ## Discussion
 
 **Sierraescape**
 
 https://github.com/protokol/taurus-contracts/pull/121
 
+**MLON33**
 
+> https://github.com/protokol/taurus-contracts/pull/121
+
+Fixed here
+
+**IAm0x52**
+
+Fix looks good. swapForTau will now revert if keeper specifies a _rewardProportion that is too large
 
 # Issue M-1: `swap()` will be reverted if `path` has more tokens. 
 
@@ -284,20 +312,30 @@ Manual Review
 
 Limit the swap pools, or check if the balance of `_outputToken` should exceed `_amountOutMinimum`.
 
+
+
 ## Discussion
 
 **Sierraescape**
 
 https://github.com/protokol/taurus-contracts/pull/82
 
+**MLON33**
 
+> https://github.com/protokol/taurus-contracts/pull/82
+
+Fixed here
+
+**IAm0x52**
+
+Fix looks good. Byte position of outputToken is now calculated dynamically based on path length rather than a hardcoded 21 bytes which only worked for single hops
 
 # Issue M-2: Mint limit is not reduced when the Vault is burning TAU 
 
 Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/149 
 
 ## Found by 
-SunSec, GimelSec, chaduke, shaka, tvdung94, Ruhum, cducrest-brainbot, nobody2018, Chinmay, duc, LethL, y1cunhui, mstpr-brainbot, HonorLt, 8olidity, bytes032
+8olidity, Chinmay, GimelSec, HonorLt, LethL, Ruhum, SunSec, bytes032, cducrest-brainbot, chaduke, duc, mstpr-brainbot, nobody2018, shaka, tvdung94, y1cunhui
 
 ## Summary
 
@@ -340,13 +378,23 @@ A simple solution would be to:
 ```
 But I suggest revisiting and rethinking this function altogether.
 
+
+
 ## Discussion
 
 **Sierraescape**
 
 https://github.com/protokol/taurus-contracts/pull/85
 
+**MLON33**
 
+> https://github.com/protokol/taurus-contracts/pull/85
+
+Fixed here
+
+**IAm0x52**
+
+Fix looks good. _decreaseCurrentMinted now always uses msg.sender as account
 
 # Issue M-3: Account can not be liquidated when price fall by 99%. 
 
@@ -422,6 +470,8 @@ Another option is you may want to calculate surcharge on `Math.min(collateralToL
         return (collateralToLiquidate, liquidationSurcharge);
 ```
 
+
+
 ## Discussion
 
 **Sierraescape**
@@ -491,7 +541,15 @@ This issue's escalations have been accepted!
 
 Contestants' payouts and scores will be updated according to the changes made on this issue.
 
+**MLON33**
 
+> https://github.com/protokol/taurus-contracts/pull/122
+
+Fixed here
+
+**IAm0x52**
+
+Fix looks good. Surcharge is now taken on actual amount liquidated rather than undercounted amount
 
 # Issue M-4: A malicious admin can steal all users collateral 
 
@@ -612,6 +670,8 @@ Manual Review
 ## Recommendation
 update of price oracle should be  restricted with a ````timelock````.
 
+
+
 ## Discussion
 
 **iHarishKumar**
@@ -656,7 +716,15 @@ This issue's escalations have been rejected!
 
 Watsons who escalated this issue will have their escalation amount deducted from their next payout.
 
+**MLON33**
 
+> https://github.com/protokol/taurus-contracts/pull/128
+
+Fixed here
+
+**IAm0x52**
+
+Fix looks good. Timelocker will now be set as owner of oracle manager adding a timelock to any oracle change
 
 # Issue M-5: SwapHandler.sol: Check that collateral token cannot be swapped is insufficient for tokens with multiple addresses 
 
@@ -685,6 +753,8 @@ Manual Review
 
 ## Recommendation
 Compare the balance of the collateral before and after sending tokens to the SwapAdapter and make sure it hasn't changed. Or implement a whitelist for tokens that can be swapped.
+
+
 
 ## Discussion
 
@@ -758,14 +828,28 @@ This issue's escalations have been accepted!
 
 Contestants' payouts and scores will be updated according to the changes made on this issue.
 
+**MLON33**
 
+> Tokens with multiple addresses are pretty rare, so we're just going to note that the vault doesn't allow such tokens as collateral, and create wrappers for them if necessary.
+> 
+> https://github.com/protokol/taurus-contracts/pull/120
+
+Fixed here
+
+**IAm0x52**
+
+No direct fix has been implemented but a note has been added explicitly stating that multi-address tokens are not supported
+
+**jacksanford1**
+
+Classifying this issue as "Acknowledged" since no direct fix was made. 
 
 # Issue M-6: User can prevent liquidations by frontrunning the tx and slightly increasing their collateral 
 
 Source: https://github.com/sherlock-audit/2023-03-taurus-judging/issues/12 
 
 ## Found by 
-cryptostellar5, Ruhum
+Ruhum, cryptostellar5
 
 ## Summary
 User can prevent liquidations by frontrunning the tx and decreasing their debt so that the liquidation transaction reverts.
@@ -869,6 +953,8 @@ Manual Review
 ## Recommendation
 In `_calcLiquidation()` the function shouldn't revert if `_debtToLiqudiate > _getMaxLiquidation()`. Instead, just continue with the value `_getMaxLiquidation()` returns. 
 
+
+
 ## Discussion
 
 **Sierraescape**
@@ -935,5 +1021,13 @@ This issue's escalations have been accepted!
 
 Contestants' payouts and scores will be updated according to the changes made on this issue.
 
+**MLON33**
 
+> https://github.com/protokol/taurus-contracts/pull/115
+
+Fixed here
+
+**IAm0x52**
+
+Fix looks good. _calcLiquidation now returns a lower debt amount if user is liquidating more than max collateral
 
